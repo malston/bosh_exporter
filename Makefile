@@ -42,8 +42,13 @@ build: promu
 	@$(PROMU) build --prefix $(PREFIX)
 
 crossbuild: promu
+ifeq ($(strip $(PLATFORMS)),)
 	@echo ">> building cross-platform binaries"
 	@$(PROMU) crossbuild
+else
+	@echo ">> building $(PLATFORMS) binaries"
+	@$(PROMU) crossbuild --platforms=$(PLATFORMS)
+endif
 
 tarball: build
 	@echo ">> building release tarball"
