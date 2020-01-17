@@ -127,7 +127,7 @@ func (c *ServiceDiscoveryCollector) Collect(deployments []deployments.Deployment
 	if c.serviceDiscoveryFilename != "" {
 		err = c.writeTargetGroupsToFile(targetGroups)
 	}
-	if c.serviceDiscoveryConfigMap != "" {
+	if c.clientset != nil && c.serviceDiscoveryConfigMap != "" {
 		err = c.writeTargetGroupsToConfigMap(targetGroups)
 	}
 
