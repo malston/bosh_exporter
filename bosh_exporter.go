@@ -84,6 +84,10 @@ var (
 		"sd.configmap", "Name for the Service Discovery ConfigMap ($BOSH_EXPORTER_SD_CONFIGMAP)",
 	).Envar("BOSH_EXPORTER_SD_CONFIGMAP").Default("bosh-target-groups").String()
 
+	k8sNamespace = kingpin.Flag(
+		"sd.namespace", "Kubernetes namespace for ConfigMap ($BOSH_EXPORTER_SD_CONFIGMAP_NAMESPACE)",
+	).Envar("BOSH_EXPORTER_SD_CONFIGMAP_NAMESPACE").Default("").String()
+
 	sdProcessesRegexp = kingpin.Flag(
 		"sd.processes_regexp", "Regexp to filter Service Discovery processes names ($BOSH_EXPORTER_SD_PROCESSES_REGEXP)",
 	).Envar("BOSH_EXPORTER_SD_PROCESSES_REGEXP").Default("").String()
@@ -344,7 +348,6 @@ func main() {
 		log.Error(err)
 		os.Exit(1)
 	}
-	k8sNamespace := "monitoring"
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
