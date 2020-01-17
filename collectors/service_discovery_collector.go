@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -13,10 +16,9 @@ import (
 	"github.com/bosh-prometheus/bosh_exporter/deployments"
 	"github.com/bosh-prometheus/bosh_exporter/filters"
 
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/api/core/v1"
-	"k8s.io/client-go/rest"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -46,13 +48,15 @@ type TargetGroup struct {
 }
 
 type ServiceDiscoveryCollector struct {
-	clientset                                       *kubernetes.Clientset
+	k8sNamespace                                    string
 	serviceDiscoveryFilename                        string
+	serviceDiscoveryConfigMap                       string
 	azsFilter                                       *filters.AZsFilter
 	processesFilter                                 *filters.RegexpFilter
 	cidrsFilter                                     *filters.CidrFilter
 	lastServiceDiscoveryScrapeTimestampMetric       prometheus.Gauge
 	lastServiceDiscoveryScrapeDurationSecondsMetric prometheus.Gauge
+	clientset                                       kubernetes.Interface
 	mu                                              *sync.Mutex
 }
 
@@ -61,10 +65,13 @@ func NewServiceDiscoveryCollector(
 	environment string,
 	boshName string,
 	boshUUID string,
+	k8sNamespace string,
 	serviceDiscoveryFilename string,
+	serviceDiscoveryConfigMap string,
 	azsFilter *filters.AZsFilter,
 	processesFilter *filters.RegexpFilter,
 	cidrsFilter *filters.CidrFilter,
+	clientset kubernetes.Interface,
 ) *ServiceDiscoveryCollector {
 	lastServiceDiscoveryScrapeTimestampMetric := prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -94,23 +101,14 @@ func NewServiceDiscoveryCollector(
 		},
 	)
 
-	// creates the in-cluster config
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err.Error())
-	}
-	// creates the clientset
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		panic(err.Error())
-	}
-
 	collector := &ServiceDiscoveryCollector{
-		clientset:                clientset,
-		serviceDiscoveryFilename: serviceDiscoveryFilename,
-		azsFilter:                azsFilter,
-		processesFilter:          processesFilter,
-		cidrsFilter:              cidrsFilter,
+		clientset:                 clientset,
+		k8sNamespace:              k8sNamespace,
+		serviceDiscoveryFilename:  serviceDiscoveryFilename,
+		serviceDiscoveryConfigMap: serviceDiscoveryConfigMap,
+		azsFilter:                 azsFilter,
+		processesFilter:           processesFilter,
+		cidrsFilter:               cidrsFilter,
 		lastServiceDiscoveryScrapeTimestampMetric:       lastServiceDiscoveryScrapeTimestampMetric,
 		lastServiceDiscoveryScrapeDurationSecondsMetric: lastServiceDiscoveryScrapeDurationSecondsMetric,
 		mu: &sync.Mutex{},
@@ -125,7 +123,13 @@ func (c *ServiceDiscoveryCollector) Collect(deployments []deployments.Deployment
 	labelGroups := c.createLabelGroups(deployments)
 	targetGroups := c.createTargetGroups(labelGroups)
 
-	err := c.writeTargetGroupsToFile(targetGroups)
+	var err error
+	if c.serviceDiscoveryFilename != "" {
+		err = c.writeTargetGroupsToFile(targetGroups)
+	}
+	if c.serviceDiscoveryConfigMap != "" {
+		err = c.writeTargetGroupsToConfigMap(targetGroups)
+	}
 
 	c.lastServiceDiscoveryScrapeTimestampMetric.Set(float64(time.Now().Unix()))
 	c.lastServiceDiscoveryScrapeTimestampMetric.Collect(ch)
@@ -194,38 +198,66 @@ func (c *ServiceDiscoveryCollector) createTargetGroups(labelGroups LabelGroups) 
 func (c *ServiceDiscoveryCollector) writeTargetGroupsToFile(targetGroups TargetGroups) error {
 	targetGroupsJSON, err := json.Marshal(targetGroups)
 	if err != nil {
-		fmt.Printf("error marshalling target groups: %v", err)
 		return errors.New(fmt.Sprintf("Error while marshalling TargetGroups: %v", err))
 	}
 
-	cm, err := c.clientset.CoreV1().ConfigMaps("monitoring").Get("bosh-target-groups", metav1.GetOptions{
-		TypeMeta: metav1.TypeMeta{Kind:"ConfigMap", APIVersion:"v1"},
-	});
-	data := make(map[string]string)
-	data["bosh_target_groups.json"] = string(targetGroupsJSON)
+	dir, name := path.Split(c.serviceDiscoveryFilename)
+	f, err := ioutil.TempFile(dir, name)
 	if err != nil {
-		fmt.Printf("error getting configmap '%s' with data '%v'\n", err.Error(), cm)
-		cm, err := c.clientset.CoreV1().ConfigMaps("monitoring").Create(&v1.ConfigMap{
-			Data: data,
-			ObjectMeta: metav1.ObjectMeta{Name: "bosh-target-groups", Namespace: "monitoring"},
+		return errors.New(fmt.Sprintf("Error creating temp file: %v", err))
+	}
+
+	_, err = f.Write(targetGroupsJSON)
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if permErr := os.Chmod(f.Name(), 0644); err == nil {
+		err = permErr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), c.serviceDiscoveryFilename)
+	}
+
+	if err != nil {
+		os.Remove(f.Name())
+	}
+
+	return err
+}
+
+func (c *ServiceDiscoveryCollector) writeTargetGroupsToConfigMap(targetGroups TargetGroups) error {
+
+	targetGroupsJSON, err := json.Marshal(targetGroups)
+	if err != nil {
+		return fmt.Errorf("Error while marshalling TargetGroups: %v", err)
+	}
+	data := map[string]string{
+		c.serviceDiscoveryConfigMap: string(targetGroupsJSON),
+	}
+
+	_, err = c.clientset.CoreV1().ConfigMaps(c.k8sNamespace).Get(c.serviceDiscoveryConfigMap, metav1.GetOptions{
+		TypeMeta: metav1.TypeMeta{Kind: "ConfigMap", APIVersion: "v1"},
+	})
+	if err != nil {
+		_, err := c.clientset.CoreV1().ConfigMaps(c.k8sNamespace).Create(&v1.ConfigMap{
+			Data:       data,
+			ObjectMeta: metav1.ObjectMeta{Name: c.serviceDiscoveryConfigMap},
 		})
 		if err != nil {
-			fmt.Printf("error creating configmap %s with data %#v\n", err.Error(), data)
-		} else {
-			fmt.Printf("configmap created %#v\n", cm)
+			return fmt.Errorf("error creating configmap: %v", err)
 		}
 		return err
 	}
-	fmt.Printf("size of data before update %d\n", len(data["bosh_target_groups.json"]))
-	cm, err = c.clientset.CoreV1().ConfigMaps("monitoring").Update(&v1.ConfigMap{
-			Data: data,
-			ObjectMeta: metav1.ObjectMeta{Name: "bosh-target-groups", Namespace: "monitoring"},
-		})
+	_, err = c.clientset.CoreV1().ConfigMaps(c.k8sNamespace).Update(&v1.ConfigMap{
+		Data:       data,
+		ObjectMeta: metav1.ObjectMeta{Name: c.serviceDiscoveryConfigMap},
+	})
 	if err != nil {
-		fmt.Printf("error updating configmap %s with data %#v\n", err.Error(), cm.Data)
+		return fmt.Errorf("error updating configmap: %v", err)
 	}
-	fmt.Printf("configmap updated %#v\n", cm)
-	fmt.Printf("size of data after update %d\n", len(cm.Data["bosh_target_groups.json"]))
 
 	return err
 }

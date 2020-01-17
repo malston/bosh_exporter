@@ -6,6 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/bosh-prometheus/bosh_exporter/deployments"
 	"github.com/bosh-prometheus/bosh_exporter/filters"
@@ -26,12 +27,15 @@ func NewBoshCollector(
 	environment string,
 	boshName string,
 	boshUUID string,
+	k8sNamespace string,
 	serviceDiscoveryFilename string,
+	serviceDiscoveryConfigMap string,
 	deploymentsFetcher *deployments.Fetcher,
 	collectorsFilter *filters.CollectorsFilter,
 	azsFilter *filters.AZsFilter,
 	processesFilter *filters.RegexpFilter,
 	cidrsFilter *filters.CidrFilter,
+	clientset kubernetes.Interface,
 ) *BoshCollector {
 	enabledCollectors := []Collector{}
 
@@ -51,10 +55,13 @@ func NewBoshCollector(
 			environment,
 			boshName,
 			boshUUID,
+			k8sNamespace,
 			serviceDiscoveryFilename,
+			serviceDiscoveryConfigMap,
 			azsFilter,
 			processesFilter,
 			cidrsFilter,
+			clientset,
 		)
 		enabledCollectors = append(enabledCollectors, serviceDiscoveryCollector)
 	}

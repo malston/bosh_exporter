@@ -12,6 +12,7 @@ import (
 	"github.com/cloudfoundry/bosh-cli/director/directorfakes"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
+	kubernetesfakes "k8s.io/client-go/kubernetes/fake"
 
 	"github.com/bosh-prometheus/bosh_exporter/deployments"
 	"github.com/bosh-prometheus/bosh_exporter/filters"
@@ -26,13 +27,16 @@ func init() {
 
 var _ = Describe("BoshCollector", func() {
 	var (
-		err                      error
-		namespace                string
-		environment              string
-		boshName                 string
-		boshUUID                 string
-		tmpfile                  *os.File
-		serviceDiscoveryFilename string
+		err                       error
+		namespace                 string
+		environment               string
+		boshName                  string
+		boshUUID                  string
+		k8sNamespace              string
+		tmpfile                   *os.File
+		serviceDiscoveryFilename  string
+		serviceDiscoveryConfigMap string
+		clientset                 *kubernetesfakes.Clientset
 
 		boshDeployments    []string
 		boshClient         *directorfakes.FakeDirector
@@ -59,6 +63,9 @@ var _ = Describe("BoshCollector", func() {
 		tmpfile, err = ioutil.TempFile("", "service_discovery_collector_test_")
 		Expect(err).ToNot(HaveOccurred())
 		serviceDiscoveryFilename = tmpfile.Name()
+		serviceDiscoveryConfigMap = ""
+		k8sNamespace = ""
+		clientset = kubernetesfakes.NewSimpleClientset()
 
 		boshDeployments = []string{}
 		boshClient = &directorfakes.FakeDirector{}
@@ -158,12 +165,15 @@ var _ = Describe("BoshCollector", func() {
 			environment,
 			boshName,
 			boshUUID,
+			k8sNamespace,
 			serviceDiscoveryFilename,
+			serviceDiscoveryConfigMap,
 			deploymentsFetcher,
 			collectorsFilter,
 			azsFilter,
 			processesFilter,
 			cidrsFilter,
+			clientset,
 		)
 	})
 

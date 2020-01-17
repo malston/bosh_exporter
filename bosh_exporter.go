@@ -15,6 +15,8 @@ import (
 	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/version"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/bosh-prometheus/bosh_exporter/collectors"
 	"github.com/bosh-prometheus/bosh_exporter/deployments"
@@ -77,6 +79,10 @@ var (
 	sdFilename = kingpin.Flag(
 		"sd.filename", "Full path to the Service Discovery output file ($BOSH_EXPORTER_SD_FILENAME)",
 	).Envar("BOSH_EXPORTER_SD_FILENAME").Default("bosh_target_groups.json").String()
+
+	sdConfigMap = kingpin.Flag(
+		"sd.configmap", "Name for the Service Discovery ConfigMap ($BOSH_EXPORTER_SD_CONFIGMAP)",
+	).Envar("BOSH_EXPORTER_SD_CONFIGMAP").Default("bosh-target-groups").String()
 
 	sdProcessesRegexp = kingpin.Flag(
 		"sd.processes_regexp", "Regexp to filter Service Discovery processes names ($BOSH_EXPORTER_SD_PROCESSES_REGEXP)",
@@ -333,17 +339,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		log.Error(err)
+		os.Exit(1)
+	}
+	k8sNamespace := "monitoring"
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Error(err)
+		os.Exit(1)
+	}
+
 	boshCollector := collectors.NewBoshCollector(
 		*metricsNamespace,
 		*metricsEnvironment,
 		boshInfo.Name,
 		boshInfo.UUID,
+		k8sNamespace,
 		*sdFilename,
+		*sdConfigMap,
 		deploymentsFetcher,
 		collectorsFilter,
 		azsFilter,
 		processesFilter,
 		cidrsFilter,
+		clientset,
 	)
 	prometheus.MustRegister(boshCollector)
 

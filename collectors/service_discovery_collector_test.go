@@ -1,6 +1,7 @@
 package collectors_test
 
 import (
+	"errors"
 	"io/ioutil"
 	"os"
 
@@ -10,6 +11,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	kubernetesfakes "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/testing"
 
 	"github.com/bosh-prometheus/bosh_exporter/deployments"
 	"github.com/bosh-prometheus/bosh_exporter/filters"
@@ -28,8 +34,11 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 		environment               string
 		boshName                  string
 		boshUUID                  string
+		k8sNamespace              string
 		tmpfile                   *os.File
 		serviceDiscoveryFilename  string
+		serviceDiscoveryConfigMap string
+		clientset                 *kubernetesfakes.Clientset
 		azsFilter                 *filters.AZsFilter
 		processesFilter           *filters.RegexpFilter
 		cidrsFilter               *filters.CidrFilter
@@ -47,6 +56,9 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 		tmpfile, err = ioutil.TempFile("", "service_discovery_collector_test_")
 		Expect(err).ToNot(HaveOccurred())
 		serviceDiscoveryFilename = tmpfile.Name()
+		serviceDiscoveryConfigMap = "bosh-target-groups"
+		k8sNamespace = "monitoring"
+		clientset = kubernetesfakes.NewSimpleClientset()
 		azsFilter = filters.NewAZsFilter([]string{})
 		cidrsFilter, err = filters.NewCidrFilter([]string{"0.0.0.0/0"})
 		processesFilter, err = filters.NewRegexpFilter([]string{})
@@ -91,10 +103,13 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 			environment,
 			boshName,
 			boshUUID,
+			k8sNamespace,
 			serviceDiscoveryFilename,
+			serviceDiscoveryConfigMap,
 			azsFilter,
 			processesFilter,
 			cidrsFilter,
+			clientset,
 		)
 	})
 
@@ -205,6 +220,56 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 					errMetrics <- err
 				}
 			}()
+		})
+
+		Context("when configmap does not exist", func() {
+			BeforeEach(func() {
+				clientset.Fake.PrependReactor("get", "configmaps", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+					return true, &v1.ConfigMap{}, errors.New("error getting configmap")
+				})
+				clientset.Fake.PrependReactor("create", "configmaps", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+					return true, &v1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: serviceDiscoveryConfigMap,
+						},
+						Data: map[string]string{
+							serviceDiscoveryConfigMap: targetGroupsContent,
+						}}, nil
+				})
+			})
+
+			It("creates a configmap", func() {
+				Eventually(metrics).Should(Receive())
+				Expect(err).ToNot(HaveOccurred())
+			})
+		})
+
+		Context("when configmap exists", func() {
+			BeforeEach(func() {
+				clientset.Fake.PrependReactor("update", "configmaps", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+					return true, &v1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: serviceDiscoveryConfigMap,
+						},
+						Data: map[string]string{
+							serviceDiscoveryConfigMap: targetGroupsContent,
+						}}, nil
+				})
+				clientset.Fake.PrependReactor("get", "configmaps", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
+					return true, &v1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: serviceDiscoveryConfigMap,
+						},
+						Data: map[string]string{
+							serviceDiscoveryConfigMap: targetGroupsContent,
+						}}, nil
+				})
+			})
+
+			It("updates the configmap", func() {
+				Eventually(metrics).Should(Receive())
+				Expect(err).ToNot(HaveOccurred())
+			})
 		})
 
 		It("writes a target groups file", func() {
