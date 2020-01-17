@@ -360,7 +360,7 @@ func main() {
 		*metricsEnvironment,
 		boshInfo.Name,
 		boshInfo.UUID,
-		k8sNamespace,
+		*k8sNamespace,
 		*sdFilename,
 		*sdConfigMap,
 		deploymentsFetcher,
