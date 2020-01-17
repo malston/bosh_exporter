@@ -345,14 +345,15 @@ func main() {
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		log.Error(err)
-		os.Exit(1)
+		log.Warnf("not running inside k8s cluster: '%s'", err.Error())
 	}
-
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Error(err)
-		os.Exit(1)
+	var clientset kubernetes.Interface
+	if config != nil {
+		clientset, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			log.Error(err)
+			os.Exit(1)
+		}
 	}
 
 	boshCollector := collectors.NewBoshCollector(
