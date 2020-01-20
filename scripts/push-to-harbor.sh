@@ -3,9 +3,9 @@
 set -eo pipefail
 
 docker_image_name="${1:-"malston/bosh-exporter"}"
-docker_image_tag="${2:-"3.3.2"}"
+docker_image_tag="${2:-"3.3.1"}"
 project="${3:-"prometheus"}"
-docker_release_tag="${4:-"3.3.2"}"
+docker_release_tag="${4:-"3.3.1"}"
 
 if [[ -z "${HARBOR_ADMIN_PASSWORD}" ]]; then
   echo "Enter the password for the harbor administrator account: "
