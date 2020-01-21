@@ -124,11 +124,13 @@ func (c *ServiceDiscoveryCollector) Collect(deployments []deployments.Deployment
 	targetGroups := c.createTargetGroups(labelGroups)
 
 	var err error
-	if c.serviceDiscoveryFilename != "" {
-		err = c.writeTargetGroupsToFile(targetGroups)
-	}
 	if c.clientset != nil && c.serviceDiscoveryConfigMap != "" {
 		err = c.writeTargetGroupsToConfigMap(targetGroups)
+	} else {
+		err = c.writeTargetGroupsToFile(targetGroups)
+	}
+	if err != nil {
+		return err
 	}
 
 	c.lastServiceDiscoveryScrapeTimestampMetric.Set(float64(time.Now().Unix()))
@@ -229,13 +231,12 @@ func (c *ServiceDiscoveryCollector) writeTargetGroupsToFile(targetGroups TargetG
 }
 
 func (c *ServiceDiscoveryCollector) writeTargetGroupsToConfigMap(targetGroups TargetGroups) error {
-
 	targetGroupsJSON, err := json.Marshal(targetGroups)
 	if err != nil {
 		return fmt.Errorf("Error while marshalling TargetGroups: %v", err)
 	}
 	data := map[string]string{
-		c.serviceDiscoveryConfigMap: string(targetGroupsJSON),
+		c.serviceDiscoveryFilename: string(targetGroupsJSON),
 	}
 
 	_, err = c.clientset.CoreV1().ConfigMaps(c.k8sNamespace).Get(c.serviceDiscoveryConfigMap, metav1.GetOptions{

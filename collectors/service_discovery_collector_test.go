@@ -56,7 +56,7 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 		tmpfile, err = ioutil.TempFile("", "service_discovery_collector_test_")
 		Expect(err).ToNot(HaveOccurred())
 		serviceDiscoveryFilename = tmpfile.Name()
-		serviceDiscoveryConfigMap = "bosh-target-groups"
+		serviceDiscoveryConfigMap = ""
 		k8sNamespace = "monitoring"
 		clientset = kubernetesfakes.NewSimpleClientset()
 		azsFilter = filters.NewAZsFilter([]string{})
@@ -163,6 +163,9 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 
 			metrics    chan prometheus.Metric
 			errMetrics chan error
+
+			s  *stubReactorChain
+			cm *v1.ConfigMap
 		)
 
 		BeforeEach(func() {
@@ -222,56 +225,6 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 			}()
 		})
 
-		Context("when configmap does not exist", func() {
-			BeforeEach(func() {
-				clientset.Fake.PrependReactor("get", "configmaps", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
-					return true, &v1.ConfigMap{}, errors.New("error getting configmap")
-				})
-				clientset.Fake.PrependReactor("create", "configmaps", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
-					return true, &v1.ConfigMap{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: serviceDiscoveryConfigMap,
-						},
-						Data: map[string]string{
-							serviceDiscoveryConfigMap: targetGroupsContent,
-						}}, nil
-				})
-			})
-
-			It("creates a configmap", func() {
-				Eventually(metrics).Should(Receive())
-				Expect(err).ToNot(HaveOccurred())
-			})
-		})
-
-		Context("when configmap exists", func() {
-			BeforeEach(func() {
-				clientset.Fake.PrependReactor("update", "configmaps", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
-					return true, &v1.ConfigMap{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: serviceDiscoveryConfigMap,
-						},
-						Data: map[string]string{
-							serviceDiscoveryConfigMap: targetGroupsContent,
-						}}, nil
-				})
-				clientset.Fake.PrependReactor("get", "configmaps", func(action testing.Action) (handled bool, ret runtime.Object, err error) {
-					return true, &v1.ConfigMap{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: serviceDiscoveryConfigMap,
-						},
-						Data: map[string]string{
-							serviceDiscoveryConfigMap: targetGroupsContent,
-						}}, nil
-				})
-			})
-
-			It("updates the configmap", func() {
-				Eventually(metrics).Should(Receive())
-				Expect(err).ToNot(HaveOccurred())
-			})
-		})
-
 		It("writes a target groups file", func() {
 			Eventually(metrics).Should(Receive())
 			targetGroups, err := ioutil.ReadFile(serviceDiscoveryFilename)
@@ -284,6 +237,110 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 			Eventually(metrics).Should(Receive())
 			Consistently(metrics).ShouldNot(Receive())
 			Consistently(errMetrics).ShouldNot(Receive())
+		})
+
+		Context("when configmap does not exist", func() {
+			BeforeEach(func() {
+				serviceDiscoveryConfigMap = "bosh-target-groups"
+				s = NewReactorChain()
+				cm = &v1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: serviceDiscoveryConfigMap,
+					},
+					Data: map[string]string{
+						serviceDiscoveryConfigMap: targetGroupsContent,
+					},
+				}
+				clientset.Fake.PrependReactor("get", "configmaps", s.NewReactionFunc(true, &v1.ConfigMap{}, errors.New("error getting configmap")))
+				clientset.Fake.PrependReactor("create", "configmaps", s.NewReactionFunc(true, cm, nil))
+			})
+
+			AfterEach(func() {
+				serviceDiscoveryConfigMap = ""
+			})
+
+			It("creates a configmap", func() {
+				Eventually(metrics).Should(Receive())
+				Expect(err).ToNot(HaveOccurred())
+				obj := s.GetResult("create").obj.(*v1.ConfigMap)
+				Expect(obj.ObjectMeta.Name).To(Equal("bosh-target-groups"))
+				Expect(obj.Data[serviceDiscoveryConfigMap]).To(Equal(targetGroupsContent))
+			})
+		})
+
+		Context("when create configmap fails", func() {
+			BeforeEach(func() {
+				serviceDiscoveryConfigMap = "bosh-target-groups"
+				s = NewReactorChain()
+				err = errors.New("error creating configmap")
+				clientset.Fake.PrependReactor("get", "configmaps", s.NewReactionFunc(true, &v1.ConfigMap{}, errors.New("error getting configmap")))
+				clientset.Fake.PrependReactor("create", "configmaps", s.NewReactionFunc(true, &v1.ConfigMap{}, err))
+			})
+
+			AfterEach(func() {
+				serviceDiscoveryConfigMap = ""
+			})
+
+			It("returns error", func() {
+				Eventually(errMetrics).Should(Receive())
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		Context("when configmap exists", func() {
+			BeforeEach(func() {
+				serviceDiscoveryConfigMap = "bosh-target-groups"
+				s = NewReactorChain()
+				cm = &v1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: serviceDiscoveryConfigMap,
+					},
+					Data: map[string]string{
+						serviceDiscoveryConfigMap: targetGroupsContent,
+					},
+				}
+				clientset.Fake.PrependReactor("get", "configmaps", s.NewReactionFunc(true, cm, nil))
+				clientset.Fake.PrependReactor("update", "configmaps", s.NewReactionFunc(true, cm, nil))
+			})
+
+			AfterEach(func() {
+				serviceDiscoveryConfigMap = ""
+			})
+
+			It("updates the configmap", func() {
+				Eventually(metrics).Should(Receive())
+				Expect(err).ToNot(HaveOccurred())
+				obj := s.GetResult("update").obj.(*v1.ConfigMap)
+				Expect(obj.ObjectMeta.Name).To(Equal("bosh-target-groups"))
+				Expect(obj.Data[serviceDiscoveryConfigMap]).To(Equal(targetGroupsContent))
+			})
+		})
+
+		Context("when update configmap fails", func() {
+			BeforeEach(func() {
+				serviceDiscoveryConfigMap = "bosh-target-groups"
+				s = NewReactorChain()
+				cm = &v1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: serviceDiscoveryConfigMap,
+					},
+					Data: map[string]string{
+						serviceDiscoveryConfigMap: targetGroupsContent,
+					},
+				}
+				err = errors.New("error updating configmap")
+				clientset.Fake.PrependReactor("get", "configmaps", s.NewReactionFunc(true, cm, nil))
+				clientset.Fake.PrependReactor("update", "configmaps", s.NewReactionFunc(true, &v1.ConfigMap{}, err))
+			})
+
+			AfterEach(func() {
+				serviceDiscoveryConfigMap = ""
+			})
+
+			It("returns error", func() {
+				Eventually(errMetrics).Should(Receive())
+				Expect(err).To(HaveOccurred())
+			})
 		})
 
 		Context("when there are no deployments", func() {
@@ -390,3 +447,32 @@ var _ = Describe("ServiceDiscoveryCollector", func() {
 		})
 	})
 })
+
+type result struct {
+	handled bool
+	obj     runtime.Object
+	err     error
+}
+
+type stubReactorChain struct {
+	results map[string]result
+}
+
+func NewReactorChain() *stubReactorChain {
+	s := &stubReactorChain{
+		results: make(map[string]result),
+	}
+	return s
+}
+
+func (s *stubReactorChain) NewReactionFunc(handled bool, ret runtime.Object, err error) testing.ReactionFunc {
+	return func(action testing.Action) (bool, runtime.Object, error) {
+		result := result{handled, ret, err}
+		s.results[action.GetVerb()] = result
+		return handled, ret, err
+	}
+}
+
+func (s *stubReactorChain) GetResult(verb string) result {
+	return s.results[verb]
+}
