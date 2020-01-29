@@ -10,17 +10,31 @@ import (
 )
 
 type DeploymentsFilter struct {
-	filters    []string
-	boshClient director.Director
+	filters         []string
+	boshClient      director.Director
+	queuedTaskLimit int
 }
 
-func NewDeploymentsFilter(filters []string, boshClient director.Director) *DeploymentsFilter {
-	return &DeploymentsFilter{filters: filters, boshClient: boshClient}
+func NewDeploymentsFilter(filters []string, boshClient director.Director, queuedTaskLimit int) *DeploymentsFilter {
+	return &DeploymentsFilter{filters: filters, boshClient: boshClient, queuedTaskLimit: queuedTaskLimit}
 }
 
 func (f *DeploymentsFilter) GetDeployments() ([]director.Deployment, error) {
 	var err error
 	var deployments []director.Deployment
+
+	currentQueuedTasks, err := f.boshClient.CurrentTasks(director.TasksFilter{
+		All:    true,
+		States: []string{"queued"},
+	})
+
+	if f.queuedTaskLimit != 0 {
+		log.Debugf("Queue task limit set to `%d`, current task queue is `%d`", len(currentQueuedTasks), f.queuedTaskLimit)
+		if len(currentQueuedTasks) > f.queuedTaskLimit {
+			log.Debug("Queued tasks has reached the limit")
+			return deployments, nil
+		}
+	}
 
 	if len(f.filters) > 0 {
 		log.Debugf("Filtering deployments by `%v`...", f.filters)

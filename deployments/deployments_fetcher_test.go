@@ -26,6 +26,7 @@ var _ = Describe("Fetcher", func() {
 		err                error
 		boshDeployments    []string
 		boshClient         *directorfakes.FakeDirector
+		queuedTaskLimit    int
 		deploymentsFilter  *filters.DeploymentsFilter
 		deploymentsFetcher *Fetcher
 	)
@@ -33,10 +34,11 @@ var _ = Describe("Fetcher", func() {
 	BeforeEach(func() {
 		boshDeployments = []string{}
 		boshClient = &directorfakes.FakeDirector{}
+		queuedTaskLimit = 0
 	})
 
 	JustBeforeEach(func() {
-		deploymentsFilter = filters.NewDeploymentsFilter(boshDeployments, boshClient)
+		deploymentsFilter = filters.NewDeploymentsFilter(boshDeployments, boshClient, queuedTaskLimit)
 		deploymentsFetcher = NewFetcher(*deploymentsFilter)
 	})
 

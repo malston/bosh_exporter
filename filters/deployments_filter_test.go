@@ -23,6 +23,7 @@ var _ = Describe("DeploymentsFilter", func() {
 		filters           []string
 		boshClient        *directorfakes.FakeDirector
 		deploymentsFilter *DeploymentsFilter
+		queuedTaskLimit   int
 	)
 
 	Describe("GetDeployments", func() {
@@ -32,11 +33,13 @@ var _ = Describe("DeploymentsFilter", func() {
 			allDeployments []director.Deployment
 
 			deployments []director.Deployment
+			tasks       []director.Task
 		)
 
 		BeforeEach(func() {
 			filters = []string{}
 			boshClient = &directorfakes.FakeDirector{}
+			queuedTaskLimit = 0
 
 			deployment1 = &directorfakes.FakeDeployment{
 				NameStub: func() string { return "fake-deployment-name-1" },
@@ -45,11 +48,24 @@ var _ = Describe("DeploymentsFilter", func() {
 				NameStub: func() string { return "fake-deployment-name-2" },
 			}
 			allDeployments = []director.Deployment{}
+			tasks = []director.Task{&directorfakes.FakeTask{}, &directorfakes.FakeTask{}}
 		})
 
 		JustBeforeEach(func() {
-			deploymentsFilter = NewDeploymentsFilter(filters, boshClient)
+			deploymentsFilter = NewDeploymentsFilter(filters, boshClient, queuedTaskLimit)
 			deployments, err = deploymentsFilter.GetDeployments()
+		})
+
+		Context("when there are more than max queued tasks", func() {
+			BeforeEach(func() {
+				queuedTaskLimit = 1
+				boshClient.CurrentTasksReturns(tasks, nil)
+			})
+
+			It("returns nil deployments", func() {
+				Expect(deployments).To(BeNil())
+				Expect(err).ToNot(HaveOccurred())
+			})
 		})
 
 		Context("when there are no filters", func() {

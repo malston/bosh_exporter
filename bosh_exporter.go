@@ -56,6 +56,10 @@ var (
 		"filter.deployments", "Comma separated deployments to filter ($BOSH_EXPORTER_FILTER_DEPLOYMENTS)",
 	).Envar("BOSH_EXPORTER_FILTER_DEPLOYMENTS").Default("").String()
 
+	queuedTaskLimit = kingpin.Flag(
+		"filter.taskQueue", "Limit the number of queued bosh tasks ($BOSH_EXPORTER_QUEUED_TASK_LIMIT)",
+	).Envar("BOSH_EXPORTER_QUEUED_TASK_LIMIT").Int()
+
 	filterAZs = kingpin.Flag(
 		"filter.azs", "Comma separated AZs to filter ($BOSH_EXPORTER_FILTER_AZS)",
 	).Envar("BOSH_EXPORTER_FILTER_AZS").Default("").String()
@@ -280,7 +284,7 @@ func buildBOSHClient() (director.Director, error) {
 
 func main() {
 	log.AddFlags(kingpin.CommandLine)
-	kingpin.Version(version.Print("fbosh_exporter"))
+	kingpin.Version(version.Print("bosh_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 
@@ -304,7 +308,7 @@ func main() {
 	if *filterDeployments != "" {
 		deploymentsFilters = strings.Split(*filterDeployments, ",")
 	}
-	deploymentsFilter := filters.NewDeploymentsFilter(deploymentsFilters, boshClient)
+	deploymentsFilter := filters.NewDeploymentsFilter(deploymentsFilters, boshClient, *queuedTaskLimit)
 	deploymentsFetcher := deployments.NewFetcher(*deploymentsFilter)
 
 	var azsFilters []string

@@ -38,8 +38,10 @@ var _ = Describe("BoshCollector", func() {
 		serviceDiscoveryConfigMap string
 		clientset                 *kubernetesfakes.Clientset
 
-		boshDeployments    []string
-		boshClient         *directorfakes.FakeDirector
+		boshDeployments []string
+		boshClient      *directorfakes.FakeDirector
+		queuedTaskLimit int
+
 		deploymentsFilter  *filters.DeploymentsFilter
 		deploymentsFetcher *deployments.Fetcher
 		collectorsFilter   *filters.CollectorsFilter
@@ -69,7 +71,8 @@ var _ = Describe("BoshCollector", func() {
 
 		boshDeployments = []string{}
 		boshClient = &directorfakes.FakeDirector{}
-		deploymentsFilter = filters.NewDeploymentsFilter(boshDeployments, boshClient)
+		queuedTaskLimit = 0
+		deploymentsFilter = filters.NewDeploymentsFilter(boshDeployments, boshClient, queuedTaskLimit)
 		deploymentsFetcher = deployments.NewFetcher(*deploymentsFilter)
 		collectorsFilter, err = filters.NewCollectorsFilter([]string{})
 		Expect(err).ToNot(HaveOccurred())
